@@ -91,6 +91,207 @@ docker run -d \
 
 The container runs as UID/GID `10001:10001` and stores its collection at `/data/apps.json`. Bind-mounted directories must be writable by that user. The Docker recipe has not yet been validated in this project; the native release build is tested.
 
+## Proxmox VE LXC
+
+**Release prerequisite:** at the time this installer was added, this repository had
+no published releases. The command below becomes usable after these files reach
+`main` and the first version tag finishes the **Check and release** workflow.
+Until then, it exits before creating a container. See [Releases](https://github.com/olivecarney/perch/releases).
+
+Run this one command in an interactive **Proxmox host shell as root**:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/olivecarney/perch/main/scripts/proxmox/install.sh)"
+```
+
+This executes code from this repository as host root. Review
+[the installer](scripts/proxmox/install.sh) first; you can download and inspect it
+before running `bash install.sh`. The installer is original Perch code, inspired by
+the Community Scripts installation experience, with no dependency on its framework.
+
+The installer creates an **unprivileged Debian 13 amd64 container** and installs a
+precompiled, statically linked x86_64 Linux binary. Rust, Cargo, Node.js, Docker,
+source code and external frontend files are not needed inside the LXC. Curl and
+CA certificates are installed for updates. ARM64 release assets are not yet provided.
+
+Use a Proxmox VE host that supports Debian 13 standard templates (target: PVE 9),
+a working Linux bridge such as `vmbr0`, outbound DNS and HTTPS access, and active
+storage supporting `rootdir` and `vztmpl` content. The template storage and root
+disk storage may be different. Containers also need access to Debian APT mirrors.
+The script downloads the newest Debian 13 standard amd64 template in the PVE
+catalogue if it is not already present on the chosen template storage.
+
+| Setting | Default |
+| --- | --- |
+| CT ID | Next unused cluster-wide ID |
+| Hostname / bridge | `perch` / `vmbr0` |
+| IPv4 / DNS | DHCP / inherit host DNS |
+| CPU | 1 core |
+| RAM / swap | 256 MiB / 256 MiB |
+| Root disk | 2 GiB |
+| Port | `3000` |
+| Container | Unprivileged; starts at host boot |
+
+Every setting above is prompted, including storage, release version and a static
+IPv4 address/prefix, gateway and space-separated IPv4 DNS servers. IPv6 provisioning
+is not currently supported. Ports must be 1024–65535. Existing CT and VM IDs are
+always refused; the installer never deletes containers. You confirm the settings
+before creation. A failed installation retains any newly created CT for diagnosis.
+
+These are conservative starting defaults, **not measured Proxmox minimums**. The
+single-thread Rust service has no server-side image processing, but Debian, APT,
+logs and app data also need resources. Maximum supported inline logos can consume
+about 12 MB of JSON before in-memory overhead. Increase RAM/disk for your workload;
+the default footprint and installation peak memory still need real-host validation.
+
+After installation, use `pct exec 123 -- hostname -I` to find the address, then open
+`http://<container-ip>:3000` (replace `123` throughout with your CT ID).
+
+### Native service configuration
+
+The binary is `/usr/local/bin/perch`, running as the dedicated `perch` system user.
+Data lives at **`/var/lib/perch/apps.json`**, owned by `perch:perch`, with directory
+mode `0750` and file mode `0640`. The directory stays writable for atomic saves.
+
+`/etc/default/perch` contains:
+
+```ini
+HOST=0.0.0.0
+PORT=3000
+PERCH_DATA=/var/lib/perch/apps.json
+```
+
+For a custom port, edit that file inside the CT and run `systemctl restart perch`.
+Keep `HOST` reachable over loopback for update health checks and keep `PERCH_DATA`
+at the managed path. The systemd service restarts on failure, drops capabilities,
+blocks privilege escalation and makes the filesystem read-only except for the
+state directory and private temporary storage. Local overrides belong in
+`systemctl edit perch`.
+
+**There is no built-in authentication or TLS.** Anyone with network access can
+read and modify your shortcuts. Do not forward this port to the internet. Restrict
+access with your network/firewall or use an authenticated HTTPS reverse proxy.
+An unprivileged LXC and systemd hardening do not replace access control.
+The installer enables `nesting=1` because Proxmox requires it for systemd service
+isolation. This also exposes host procfs/sysfs contents to the guest, as described
+in the [Proxmox container configuration documentation](https://raw.githubusercontent.com/proxmox/pve-docs/master/generated/pct.conf.5-opts.adoc).
+
+### Updates and backups
+
+From the Proxmox host:
+
+```bash
+pct exec 123 -- perch-update
+```
+
+Or run `perch-update` as root inside the CT. To choose a published version:
+
+```bash
+pct exec 123 -- perch-update v0.1.0
+```
+
+The updater resolves the latest stable GitHub release once, downloads its x86_64
+archive and SHA-256 manifest, and verifies the checksum before stopping Perch.
+The replacement uses an atomic rename on the same filesystem. Startup and an HTTP
+check against `/api/apps` must succeed; otherwise the previous binary is restored
+and restarted. Interrupted updates also attempt rollback (except untrappable
+power loss or `SIGKILL`). A lock prevents overlapping native installs/updates.
+The installed version is in `/usr/local/lib/perch/VERSION`.
+
+Updates replace **only the executable and version marker**. They never write,
+delete or migrate `apps.json`, and preserve your service settings. Back up the
+collection before updates; a future release with a data format change may need
+manual compatibility checks. Service/updater changes in future releases may also
+require a separately documented maintenance step. Checksums detect corrupted
+transfers; they rely on the integrity of the GitHub repository and release account,
+and are not independent signatures.
+
+To copy your collection to the host:
+
+```bash
+pct pull 123 /var/lib/perch/apps.json ./perch-apps.json
+```
+
+To restore: stop the service, copy the backup into place, ensure `perch:perch`
+ownership and `0640` permissions, then start the service. Keep the existing
+container/data intact if an old binary cannot read a newer file.
+
+### Troubleshooting and uninstall
+
+From the Proxmox host:
+
+```bash
+pct status 123
+pct config 123
+pct exec 123 -- systemctl status perch --no-pager
+pct exec 123 -- journalctl -u perch -n 100 --no-pager
+pct exec 123 -- cat /usr/local/lib/perch/VERSION
+pct exec 123 -- curl -f http://127.0.0.1:3000/api/apps
+```
+
+For unreachable containers, check DHCP leases or static IP/gateway, DNS, the bridge
+and PVE firewall rules. For a missing asset/404, check that the release workflow
+finished and both the archive and `SHA256SUMS` are published. For a checksum
+failure, retry and investigate the release; do not bypass verification. For
+startup failures, check logs and data permissions. Malformed existing JSON stops
+Perch rather than overwriting the collection. A rollback failure reports the
+retained previous-binary path for manual recovery.
+
+If installation fails after CT creation, inspect the retained CT before making
+changes. It may be partially configured. Choose a new ID for another attempt, or
+explicitly remove the failed CT after checking it contains no needed data.
+
+To remove **the entire container and all its data**, first copy your backup off
+it, verify the CT ID, and then explicitly run:
+
+```bash
+pct stop 123
+pct destroy 123 --purge
+```
+
+To remove only Perch while keeping the CT and collection, run inside the CT:
+
+```bash
+systemctl disable --now perch
+rm -f /etc/systemd/system/perch.service /etc/default/perch
+rm -f /usr/local/bin/perch /usr/local/sbin/perch-update
+rm -rf /usr/local/lib/perch
+systemctl daemon-reload
+```
+
+This leaves `/var/lib/perch/apps.json` and its system user in place.
+
+### Publishing a release (maintainers)
+
+The workflow reads `rust-version` from `Cargo.toml` (currently 1.98), runs formatting,
+Rust tests, Clippy, JavaScript tests and deployment tests, then builds with the
+existing size-optimised release profile for `x86_64-unknown-linux-musl`. It rejects
+binaries that need a dynamic loader or shared libraries, and runs the HTTP suite
+with the exact Linux release binary outside the source tree. Musl static linking
+avoids a dependency on the build runner's glibc version.
+
+After merging the workflow, make the package version in `Cargo.toml` and
+`Cargo.lock` match the intended release, commit, then push a matching version tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow creates a draft, uploads all assets, then publishes it. Prerelease
+tags remain prereleases and are not selected by `latest`. Pull requests, pushes
+to `main` and manual runs build/test and upload Actions artifacts without publishing.
+Release assets are:
+
+- `perch-x86_64-unknown-linux-musl.tar.gz` (binary, native deployment scripts, unit,
+  version marker and licenses; archive metadata and gzip timestamps normalised)
+- `SHA256SUMS`
+
+The Linux build/packaging and systemd/LXC lifecycle must still be validated by the
+first CI run and a real Proxmox installation. Local tests cover application
+behavior, archive verification, update/rollback and host input checks with external
+service/Proxmox calls mocked; they do not establish production host compatibility.
+
 ## Development
 
 ```sh
@@ -108,6 +309,10 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo build --release --locked
 PERCH_BINARY=target/release/perch python3 tests/test_http.py
 node --test tests/logos.test.mjs
+python3 tests/test_deployment.py
+bash -n scripts/proxmox/install.sh scripts/install-native.sh scripts/perch-update scripts/release-common.sh
+shellcheck -x scripts/proxmox/install.sh scripts/install-native.sh scripts/perch-update scripts/release-common.sh
+actionlint
 ```
 
 Python 3 is needed for HTTP integration tests, and Node.js 18+ for the logo tests. Neither is needed to run Perch. HTTP tests use disposable server processes and temporary collections, leaving your apps untouched.

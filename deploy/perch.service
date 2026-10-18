@@ -1,0 +1,38 @@
+[Unit]
+Description=Perch homelab dashboard
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=perch
+Group=perch
+WorkingDirectory=/var/lib/perch
+Environment=HOST=0.0.0.0 PORT=3000 PERCH_DATA=/var/lib/perch/apps.json
+EnvironmentFile=-/etc/default/perch
+ExecStart=/usr/local/bin/perch
+Restart=on-failure
+RestartSec=3
+StateDirectory=perch
+StateDirectoryMode=0750
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/perch
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Updates only the executable. Never reads, writes, or migrates application data.
+set -Eeuo pipefail
+umask 077
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=scripts/release-common.sh
+if [[ -f $SCRIPT_DIR/release-common.sh ]]; then
+    source "$SCRIPT_DIR/release-common.sh"
+else
+    source /usr/local/lib/perch/release-common.sh
+fi
+BINARY=/usr/local/bin/perch
+STATE_DIR=/usr/local/lib/perch
+
+perch_update() (
+    # Subshell-scoped state survives Bash unwinding before the EXIT trap.
+    version=${1:-latest} work='' backup='' candidate='' replacing=0
+    [[ -f $BINARY && ! -L $BINARY ]] || perch_die "Missing regular executable: $BINARY"
+    work=$(mktemp -d)
+    # shellcheck disable=SC2329 # Invoked by the EXIT trap.
+    cleanup_update() {
+        local status=$?
+        trap - EXIT INT TERM
+        if ((replacing)); then
+            printf 'Update failed; restoring the previous binary.\n' >&2
+            if mv -f -- "$backup" "$BINARY"; then
+                if [[ -f $work/VERSION.previous ]]; then
+                    install -m 0644 "$work/VERSION.previous" "$STATE_DIR/VERSION" || true
+                fi
+                systemctl reset-failed perch || true
+                if ! systemctl restart perch || ! perch_healthy; then
+                    printf 'Previous binary restored, but service is unhealthy. Check journalctl -u perch.\n' >&2
+                fi
+            else
+                printf 'ROLLBACK FAILED. Previous binary retained at %s\n' "$backup" >&2
+            fi
+        elif [[ -n $backup ]]; then
+            rm -f -- "$backup"
+        fi
+        [[ -z $candidate ]] || rm -f -- "$candidate"
+        rm -rf -- "$work"
+        exit "$status"
+    }
+    trap cleanup_update EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    perch_download "$work" "$version"
+    if [[ -f $STATE_DIR/VERSION ]]; then cp -p "$STATE_DIR/VERSION" "$work/VERSION.previous"; fi
+    candidate=$(mktemp "$BINARY.new.XXXXXX")
+    backup=$(mktemp "$BINARY.previous.XXXXXX")
+    install -m 0755 "$work/bundle/perch" "$candidate"
+    cp -p -- "$BINARY" "$backup"
+    # Backups and replacement live on the binary's filesystem for atomic rename.
+    # Mark rollback necessary BEFORE stopping/replacing, including signal failures.
+    replacing=1
+    systemctl stop perch
+    mv -f -- "$candidate" "$BINARY"
+    systemctl reset-failed perch || true
+    systemctl restart perch
+    perch_healthy || perch_die 'Updated service did not pass its HTTP health check.'
+    install -m 0644 "$work/bundle/VERSION" "$STATE_DIR/VERSION.new"
+    mv -f -- "$STATE_DIR/VERSION.new" "$STATE_DIR/VERSION"
+    replacing=0
+    printf 'Perch updated to %s.\n' "$(cat "$STATE_DIR/VERSION")"
+)
+
+main() {
+    [[ $EUID == 0 ]] || perch_die 'Run as root inside the Perch container.'
+    [[ $(uname -m) == x86_64 ]] || perch_die 'Only Linux x86_64 releases are currently supported.'
+    (($# <= 1)) || perch_die 'Usage: perch-update [vX.Y.Z]'
+    # util-linux flock is supplied by the Debian base image. Same lock as bootstrap.
+    exec 9>/run/lock/perch-install.lock
+    flock -n 9 || perch_die 'Another Perch install/update is running.'
+    perch_update "${1:-latest}"
+}
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then main "$@"; fi

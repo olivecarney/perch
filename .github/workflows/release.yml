@@ -1,0 +1,115 @@
+name: Check and release
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      TARGET: x86_64-unknown-linux-musl
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the repository's minimum Rust toolchain
+        shell: bash
+        run: |
+          version=$(sed -n 's/^rust-version = "\([^"]*\)"/\1/p' Cargo.toml)
+          test -n "$version"
+          rustup toolchain install "$version" --profile minimal --component rustfmt,clippy --target "$TARGET"
+          rustup override set "$version"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools shellcheck
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check and test
+        run: |
+          cargo fmt --check
+          cargo test --locked
+          cargo clippy --locked --all-targets -- -D warnings
+          node --test tests/logos.test.mjs
+          bash -n scripts/proxmox/install.sh scripts/install-native.sh scripts/perch-update scripts/release-common.sh
+          shellcheck -x scripts/proxmox/install.sh scripts/install-native.sh scripts/perch-update scripts/release-common.sh
+          python3 tests/test_deployment.py
+      - name: Build and verify static Linux binary
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: |
+          cargo build --release --locked --target "$TARGET"
+          binary="target/$TARGET/release/perch"
+          if readelf -l "$binary" | grep -q INTERP; then
+            echo 'Binary requires a dynamic loader' >&2; exit 1
+          fi
+          if readelf -d "$binary" | grep -q NEEDED; then
+            echo 'Binary requires shared libraries' >&2; exit 1
+          fi
+          # Run the exact release binary with no checkout-relative assets.
+          cd "$(mktemp -d)"
+          PERCH_BINARY="$GITHUB_WORKSPACE/$binary" python3 "$GITHUB_WORKSPACE/tests/test_http.py"
+      - name: Package release
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -1)
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "Tag must match Cargo.toml: v$version" >&2; exit 1
+          fi
+          mkdir -p dist package
+          install -m 755 "target/$TARGET/release/perch" package/perch
+          install -m 755 scripts/install-native.sh scripts/perch-update package/
+          install -m 644 scripts/release-common.sh deploy/perch.service LICENSE THIRD_PARTY.md package/
+          cp public/fonts/OFL.txt package/FONT-LICENSE.txt
+          cp public/icons/LICENSE package/ICONS-LICENSE
+          printf '%s\n' "v$version" > package/VERSION
+          epoch=$(git log -1 --format=%ct)
+          tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \
+            -C package -cf - . | gzip -n > "dist/perch-$TARGET.tar.gz"
+          (cd dist && sha256sum "perch-$TARGET.tar.gz" > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: perch-x86_64-unknown-linux-musl
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: perch-x86_64-unknown-linux-musl
+          path: dist
+      - name: Publish assets before making release visible
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Draft first: latest never points at an incomplete upload.
+          if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [[ "$draft" != true ]]; then
+              echo 'Refusing to replace assets of an already published release' >&2
+              exit 1
+            fi
+          else
+            gh release create "$TAG" --verify-tag --draft --generate-notes
+          fi
+          # Allow retrying an interrupted upload while the release is still a draft.
+          gh release upload "$TAG" dist/* --clobber
+          prerelease=false
+          if [[ "$TAG" == *-* ]]; then prerelease=true; fi
+          gh release edit "$TAG" --draft=false --prerelease="$prerelease"
