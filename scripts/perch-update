@@ -17,7 +17,7 @@ perch_update() (
     version=${1:-latest} work='' backup='' candidate='' replacing=0
     [[ -f $BINARY && ! -L $BINARY ]] || perch_die "Missing regular executable: $BINARY"
     work=$(mktemp -d)
-    # shellcheck disable=SC2329 # Invoked by the EXIT trap.
+    # shellcheck disable=SC2317,SC2329 # Invoked indirectly by the EXIT trap (ShellCheck 0.9+).
     cleanup_update() {
         local status=$?
         trap - EXIT INT TERM

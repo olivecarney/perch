@@ -187,7 +187,7 @@ pct exec 123 -- perch-update
 Or run `perch-update` as root inside the CT. To choose a published version:
 
 ```bash
-pct exec 123 -- perch-update v0.1.0
+pct exec 123 -- perch-update v0.1.1
 ```
 
 The updater resolves the latest stable GitHub release once, downloads its x86_64
@@ -274,8 +274,8 @@ After merging the workflow, make the package version in `Cargo.toml` and
 `Cargo.lock` match the intended release, commit, then push a matching version tag:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 The workflow creates a draft, uploads all assets, then publishes it. Prerelease

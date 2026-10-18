@@ -99,7 +99,7 @@ perch_host_main() (
     exec 3<>/dev/tty || perch_die 'An interactive terminal is required.'
     CTID='' HOSTNAME='' IP='' GATEWAY='' DNS='' STORAGE='' TEMPLATE_STORAGE='' CORES='' MEMORY='' SWAP='' DISK='' PORT='' BRIDGE='' VERSION=''
     roots='' templates='' default_storage='' template='' volume='' net='' work='' attempted=0 complete=0 address='' answer='' prefix='' ns=''
-    # shellcheck disable=SC2329 # Invoked by the EXIT trap.
+    # shellcheck disable=SC2317,SC2329 # Invoked indirectly by the EXIT trap (ShellCheck 0.9+).
     cleanup_host() {
         local status=$?
         trap - EXIT INT TERM
