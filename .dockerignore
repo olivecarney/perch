@@ -1,0 +1,15 @@
+target
+.git
+data
+tests
+docs
+node_modules
+__pycache__
+.venv
+.env
+.env.*
+*.log
+*.tmp
+*.pem
+*.key
+.DS_Store

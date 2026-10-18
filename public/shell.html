@@ -1,0 +1,57 @@
+<svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+
+
+
+
+
+
+
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6h12v12"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></symbol>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+
+<symbol id="i-bird" viewBox="0 0 48 56"><path d="M7 45 23 17c4-7 14-7 15 0 2 12-13 21-25 22L7 45Zm8-8 14-15M26 12c-1-7 10-9 12-2l5 3-6 1M17 47h20M27 47v8"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="m16 3 5 5-12 12-6 1 1-6ZM14 5l5 5"/></symbol>
+<symbol id="i-grip" viewBox="0 0 24 24"><path d="M8 5h.01M16 5h.01M8 12h.01M16 12h.01M8 19h.01M16 19h.01" stroke-width="3"/></symbol>
+<symbol id="i-left" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></symbol>
+<symbol id="i-right" viewBox="0 0 24 24"><path d="m10 6 6 6-6 6"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5L20 7"/></symbol>
+</defs></svg>
+<a class="skip" href="#apps">Skip to apps</a>
+<main>
+  <header class="header">
+    <a class="brand" href="/" aria-label="Perch home"><svg class="bird"><use href="#i-bird"/></svg><span>perch</span></a>
+    <div class="header-actions">
+      <button class="icon-button arrange-button" id="arrange" aria-label="Edit apps" aria-pressed="false" title="Edit apps"><svg><use href="#i-edit"/></svg></button>
+      <button class="primary" data-add><svg><use href="#i-plus"/></svg><span>Add app</span></button>
+    </div>
+  </header>
+  <section id="apps" class="apps" aria-label="Apps" tabindex="-1"></section>
+  <p id="load-error" class="error" role="alert" hidden>Couldn't load your apps. Reload to try again.</p>
+  <noscript><p class="error">Enable JavaScript to use Perch.</p></noscript>
+</main>
+<dialog id="editor" aria-labelledby="dialog-title">
+  <form id="app-form">
+    <div class="dialog-heading"><h1 id="dialog-title">Add app</h1><button type="button" class="icon-button" id="close-editor" aria-label="Close"><svg><use href="#i-close"/></svg></button></div>
+    <input type="hidden" name="id">
+    <label>Name<input name="name" placeholder="Jellyfin" maxlength="80" required autocomplete="off"></label>
+    <label>URL or IP address<input name="address" placeholder="192.168.1.10:8096" maxlength="2048" required spellcheck="false" autocapitalize="off" autocomplete="off"></label>
+    <details id="logo-details">
+      <summary><span class="logo-summary"><img id="logo-preview" src="/icons/server.svg?v=1" width="24" height="24" alt=""><span>Logo</span></span><span id="logo-label">Automatic</span></summary>
+      <div class="logo-settings">
+        <button type="button" id="auto-logo" class="auto-logo selected" aria-pressed="true"><svg><use href="#i-check"/></svg>Automatic from URL</button>
+        <div class="logo-options" id="logo-options" role="group" aria-label="Bundled logos"></div>
+        <label>Image URL<input id="logo-url" type="url" placeholder="https://example.com/logo.svg" aria-label="Image URL" spellcheck="false" autocapitalize="off"></label>
+        <button type="button" class="secondary upload-button" id="upload-logo">Upload image</button>
+        <input type="file" id="logo-file" accept="image/png,image/jpeg,image/webp" hidden>
+      </div>
+    </details>
+    <p id="form-error" class="error" role="alert" hidden></p>
+    <div class="dialog-actions"><button type="button" class="icon-button danger" id="delete-app" aria-label="Delete app" title="Delete app" hidden><svg><use href="#i-trash"/></svg></button><button type="button" class="secondary" id="cancel-editor">Cancel</button><button type="submit" class="primary" id="save-app">Add app</button></div>
+  </form>
+</dialog>
+<dialog id="delete-dialog" aria-labelledby="delete-title"><h2 id="delete-title">Remove app?</h2><p id="delete-name"></p><p class="error" id="delete-error" role="alert" hidden></p><div class="dialog-actions"><button class="secondary" id="cancel-delete">Cancel</button><button class="primary destructive" id="confirm-delete">Remove</button></div></dialog>
+<div id="toast" role="status" hidden></div>

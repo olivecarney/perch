@@ -1,0 +1,34 @@
+# Rust build output and locally copied executable
+/target/
+/perch
+
+# Local app collection (including atomic-write temporary files)
+/data/
+/apps.json
+/apps.json.tmp
+
+# Environment variables and local credentials
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+
+# Python test caches
+__pycache__/
+*.py[cod]
+.venv/
+
+# Optional local JavaScript tooling
+node_modules/
+
+# Logs, temporary files, and OS/editor state
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
+*~
