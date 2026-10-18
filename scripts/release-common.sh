@@ -48,13 +48,17 @@ perch_download() {
 }
 # END RELEASE DOWNLOAD
 
+perch_valid_port() {
+    [[ $1 =~ ^[1-9][0-9]{0,4}$ ]] && (($1 <= 65535))
+}
+
 perch_healthy() {
-    local attempt port=3000
+    local attempt port=80
     # This file is root-owned and uses systemd EnvironmentFile syntax (no shell code).
     if [[ -f /etc/default/perch ]]; then
         port=$(sed -n 's/^PORT=//p' /etc/default/perch)
     fi
-    [[ $port =~ ^[0-9]+$ ]] && ((port >= 1 && port <= 65535)) || return 1
+    perch_valid_port "$port" || return 1
     for ((attempt=0; attempt<20; attempt++)); do
         if systemctl is-active --quiet perch &&
             curl --fail --silent --max-time 2 --noproxy '*' "http://127.0.0.1:$port/api/apps" > /dev/null; then

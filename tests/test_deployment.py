@@ -21,6 +21,54 @@ class Deployment(unittest.TestCase):
                                'test', str(ROOT / script)], cwd=self.path,
                               text=True, capture_output=True)
 
+    def test_host_entrypoint_supports_command_file_and_sourcing(self):
+        # Replace only the host side effects; exercise the real entrypoint guard.
+        script = (ROOT / 'scripts/proxmox/install.sh').read_text()
+        boundary = script.rindex('\nif [[')
+        script = (script[:boundary] + '\nperch_host_main() { printf "launched\\n"; }\n'
+                  + script[boundary:])
+        file = self.path / 'installer.sh'
+        file.write_text(script)
+        for command in [['bash', '-c', script], ['bash', str(file)],
+                        ['bash', '-c', 'source "$1"', 'test', str(file)]]:
+            result = subprocess.run(command, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            expected = '' if 'source "$1"' in command else 'launched\n'
+            self.assertEqual(result.stdout, expected)
+
+    def test_old_release_with_low_port_is_rejected_before_install(self):
+        bundle = self.path / 'bundle'
+        bundle.mkdir()
+        unit = bundle / 'perch.service'
+        unit.write_text('AmbientCapabilities=\n')
+        result = self.shell('scripts/proxmox/install.sh', 'perch_check_release_port "$PWD/bundle" 80')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('v0.1.2', result.stderr)
+        result = self.shell('scripts/proxmox/install.sh', 'perch_check_release_port "$PWD/bundle" 3000')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        unit.write_text('AmbientCapabilities=CAP_NET_BIND_SERVICE\n')
+        result = self.shell('scripts/proxmox/install.sh', 'perch_check_release_port "$PWD/bundle" 80')
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_http_port_validation(self):
+        for value in ['80', '443', '3000', '65535']:
+            result = self.shell('scripts/release-common.sh', f'perch_valid_port "{value}"')
+            self.assertEqual(result.returncode, 0, result.stderr)
+        for value in ['0', '080', '65536', '-1', '9999999999999999999999', '80;id']:
+            result = self.shell('scripts/release-common.sh', f'perch_valid_port "{value}"')
+            self.assertNotEqual(result.returncode, 0, value)
+
+    def test_service_supports_port_80_without_running_as_root(self):
+        import configparser
+        config = configparser.ConfigParser(interpolation=None, strict=False)
+        config.read(ROOT / 'deploy/perch.service')
+        service = config['Service']
+        self.assertEqual(service['User'], 'perch')
+        self.assertIn('PORT=80', service['Environment'].split())
+        self.assertEqual(service['CapabilityBoundingSet'], 'CAP_NET_BIND_SERVICE')
+        self.assertEqual(service['AmbientCapabilities'], 'CAP_NET_BIND_SERVICE')
+        self.assertEqual(service['NoNewPrivileges'], 'true')
+
     def archive(self, bad_member=None, version='v0.1.0', symlink=False):
         archive = self.path / 'release.tar.gz'
         with tarfile.open(archive, 'w:gz') as tar:

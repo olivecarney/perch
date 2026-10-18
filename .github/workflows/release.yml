@@ -76,6 +76,29 @@ jobs:
           tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \
             -C package -cf - . | gzip -n > "dist/perch-$TARGET.tar.gz"
           (cd dist && sha256sum "perch-$TARGET.tar.gz" > SHA256SUMS)
+      - name: Verify native service on HTTP port 80
+        shell: bash
+        run: |
+          cleanup() {
+            status=$?
+            if ((status != 0)); then sudo journalctl -u perch --no-pager; fi
+            sudo systemctl stop perch || true
+            exit "$status"
+          }
+          trap cleanup EXIT
+          sudo bash package/install-native.sh
+          test "$(systemctl show -p User --value perch)" = perch
+          curl --fail --silent --show-error --noproxy '*' http://127.0.0.1/ > /dev/null
+          curl --fail --silent --show-error --noproxy '*' \
+            -H 'Content-Type: application/json' \
+            --data '{"action":"save","app":{"id":0,"name":"CI persistence check","address":"http://127.0.0.1","logo":"server"}}' \
+            http://127.0.0.1/api/apps > /dev/null
+          sudo systemctl restart perch
+          for ((attempt=0; attempt<20; attempt++)); do
+            if curl --fail --silent --noproxy '*' http://127.0.0.1/api/apps > /tmp/perch-native-data.json; then break; fi
+            sleep 1
+          done
+          python3 -c 'import json; assert json.load(open("/tmp/perch-native-data.json"))[0]["name"] == "CI persistence check"'
       - uses: actions/upload-artifact@v4
         with:
           name: perch-x86_64-unknown-linux-musl

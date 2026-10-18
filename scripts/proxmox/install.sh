@@ -71,6 +71,12 @@ perch_assert_unused_id() {
         perch_die "CT/VM ID $1 already exists or cannot be reserved. Choose another ID."
 }
 
+perch_check_release_port() {
+    if (($2 < 1024)) && ! grep -Fxq 'AmbientCapabilities=CAP_NET_BIND_SERVICE' "$1/perch.service"; then
+        perch_die 'This release cannot bind low ports. Choose v0.1.2 or newer, or select a port such as 3000.'
+    fi
+}
+
 perch_create_ct() {
     local id=$1 volume=$2
     shift 2
@@ -154,13 +160,13 @@ perch_host_main() (
     perch_prompt MEMORY 'RAM (MiB)' 256
     perch_prompt SWAP 'Swap (MiB; 0 to disable)' 256
     perch_prompt DISK 'Disk size (GiB)' 2
-    perch_prompt PORT 'Application port' 3000
+    perch_prompt PORT 'Application port (80 needs no port in the URL)' 80
     perch_prompt VERSION 'Release (latest or vX.Y.Z)' latest
     perch_number 'CPU cores' "$CORES" 1 "$(nproc)"
     perch_number 'RAM (MiB)' "$MEMORY" 256 1048576
     if [[ $SWAP != 0 ]]; then perch_number 'Swap (MiB)' "$SWAP" 1 1048576; fi
     perch_number 'Disk size (GiB)' "$DISK" 2 1048576
-    perch_number 'Application port' "$PORT" 1024 65535
+    perch_number 'Application port' "$PORT" 1 65535
     printf '\nCreate CT %s (%s), %s, bridge %s, storage %s\nCPU %s; RAM %s MiB; swap %s MiB; disk %s GiB; port %s; release %s\n' \
         "$CTID" "$HOSTNAME" "$IP" "$BRIDGE" "$STORAGE" "$CORES" "$MEMORY" "$SWAP" "$DISK" "$PORT" "$VERSION" >&3
     printf 'Perch has no authentication. Restrict access to a trusted LAN or authenticated proxy.\n' >&3
@@ -171,6 +177,7 @@ perch_host_main() (
     # Fail before creating a CT if releases/assets are not yet available.
     work=$(mktemp -d)
     perch_download "$work" "$VERSION"
+    perch_check_release_port "$work/bundle" "$PORT"
     pveam update
     template=$(pveam available --section system | awk '$2 ~ /^debian-13-standard_.*_amd64\.tar\.(zst|xz|gz)$/ {print $2}' | sort -V | tail -1)
     [[ -n $template ]] || perch_die 'No Debian 13 amd64 standard template available. Check your Proxmox version/template catalogue.'
@@ -203,7 +210,12 @@ perch_host_main() (
     pct exec "$CTID" -- bash -c 'set -e; cd /root/perch-install; mv release.tar.gz perch-x86_64-unknown-linux-musl.tar.gz; sha256sum --check expected.sha256; mkdir bundle; tar -xzf perch-x86_64-unknown-linux-musl.tar.gz -C bundle --no-same-owner; bash bundle/install-native.sh "$1"' bash "$PORT"
     pct exec "$CTID" -- rm -rf /root/perch-install
     complete=1
-    printf '\nPerch installed in CT %s. Open http://<container-ip>:%s\n' "$CTID" "$PORT"
+    local url='http://<container-ip>'
+    if [[ $PORT != 80 ]]; then url+=":$PORT"; fi
+    printf '\nPerch installed in CT %s. Open %s/\n' "$CTID" "$url"
     printf 'Show addresses: pct exec %s -- hostname -I\nUpdate: pct exec %s -- perch-update\n' "$CTID" "$CTID"
 )
-if [[ ${BASH_SOURCE[0]} == "$0" ]]; then perch_host_main "$@"; fi
+# bash -c/stdin has no source filename; sourcing a file must remain side-effect free.
+if [[ -z ${BASH_SOURCE[0]:-} || ${BASH_SOURCE[0]:-} == "$0" ]]; then
+    perch_host_main "$@"
+fi

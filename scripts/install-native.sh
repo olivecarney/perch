@@ -7,11 +7,11 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/release-common.sh"
 
 main() {
-    local port=${1:-3000}
+    local port=${1:-80}
     [[ $EUID == 0 ]] || perch_die 'Native installation requires root.'
     [[ $(uname -m) == x86_64 ]] || perch_die 'Only x86_64 is currently supported.'
-    if ! [[ $port =~ ^[1-9][0-9]{3,4}$ ]] || ! ((port >= 1024 && port <= 65535)); then
-        perch_die 'Port must be an integer between 1024 and 65535.'
+    if ! perch_valid_port "$port"; then
+        perch_die 'Port must be an integer between 1 and 65535.'
     fi
     exec 9>/run/lock/perch-install.lock
     flock -n 9 || perch_die 'Another Perch install/update is running.'

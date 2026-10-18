@@ -129,12 +129,13 @@ catalogue if it is not already present on the chosen template storage.
 | CPU | 1 core |
 | RAM / swap | 256 MiB / 256 MiB |
 | Root disk | 2 GiB |
-| Port | `3000` |
+| Port | `80` (standard HTTP; no port suffix needed) |
 | Container | Unprivileged; starts at host boot |
 
 Every setting above is prompted, including storage, release version and a static
 IPv4 address/prefix, gateway and space-separated IPv4 DNS servers. IPv6 provisioning
-is not currently supported. Ports must be 1024–65535. Existing CT and VM IDs are
+is not currently supported. Ports must be 1–65535. Port 80 requires release
+`v0.1.2` or newer; older releases can still use a port such as 3000. Existing CT and VM IDs are
 always refused; the installer never deletes containers. You confirm the settings
 before creation. A failed installation retains any newly created CT for diagnosis.
 
@@ -145,7 +146,7 @@ about 12 MB of JSON before in-memory overhead. Increase RAM/disk for your worklo
 the default footprint and installation peak memory still need real-host validation.
 
 After installation, use `pct exec 123 -- hostname -I` to find the address, then open
-`http://<container-ip>:3000` (replace `123` throughout with your CT ID).
+`http://<container-ip>/` (replace `123` throughout with your CT ID).
 
 ### Native service configuration
 
@@ -157,14 +158,14 @@ mode `0750` and file mode `0640`. The directory stays writable for atomic saves.
 
 ```ini
 HOST=0.0.0.0
-PORT=3000
+PORT=80
 PERCH_DATA=/var/lib/perch/apps.json
 ```
 
 For a custom port, edit that file inside the CT and run `systemctl restart perch`.
 Keep `HOST` reachable over loopback for update health checks and keep `PERCH_DATA`
-at the managed path. The systemd service restarts on failure, drops capabilities,
-blocks privilege escalation and makes the filesystem read-only except for the
+at the managed path. The systemd service restarts on failure, grants only `CAP_NET_BIND_SERVICE` so
+the `perch` user can bind port 80, blocks privilege escalation and makes the filesystem read-only except for the
 state directory and private temporary storage. Local overrides belong in
 `systemctl edit perch`.
 
@@ -175,6 +176,28 @@ An unprivileged LXC and systemd hardening do not replace access control.
 The installer enables `nesting=1` because Proxmox requires it for systemd service
 isolation. This also exposes host procfs/sysfs contents to the guest, as described
 in the [Proxmox container configuration documentation](https://raw.githubusercontent.com/proxmox/pve-docs/master/generated/pct.conf.5-opts.adoc).
+
+### Existing installations on port 3000
+
+Binary updates preserve your configuration and service unit, so they do not change
+an existing installation's port. To switch an existing CT to standard HTTP, run
+these commands as root **inside that CT** (`pct enter 123` from the host):
+
+```bash
+mkdir -p /etc/systemd/system/perch.service.d
+cat > /etc/systemd/system/perch.service.d/http.conf <<'EOF'
+[Service]
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+EOF
+sed -i 's/^PORT=.*/PORT=80/' /etc/default/perch
+systemctl daemon-reload
+systemctl restart perch
+```
+
+Then open `http://<container-ip>/`. This does not touch your collection. Ensure
+port 80 is available and permitted by your firewall. Native builds launched by
+hand and Docker retain their existing port 3000 default.
 
 ### Updates and backups
 
@@ -187,7 +210,7 @@ pct exec 123 -- perch-update
 Or run `perch-update` as root inside the CT. To choose a published version:
 
 ```bash
-pct exec 123 -- perch-update v0.1.1
+pct exec 123 -- perch-update v0.1.2
 ```
 
 The updater resolves the latest stable GitHub release once, downloads its x86_64
@@ -226,7 +249,7 @@ pct config 123
 pct exec 123 -- systemctl status perch --no-pager
 pct exec 123 -- journalctl -u perch -n 100 --no-pager
 pct exec 123 -- cat /usr/local/lib/perch/VERSION
-pct exec 123 -- curl -f http://127.0.0.1:3000/api/apps
+pct exec 123 -- curl -f http://127.0.0.1/api/apps
 ```
 
 For unreachable containers, check DHCP leases or static IP/gateway, DNS, the bridge
@@ -267,15 +290,17 @@ The workflow reads `rust-version` from `Cargo.toml` (currently 1.98), runs forma
 Rust tests, Clippy, JavaScript tests and deployment tests, then builds with the
 existing size-optimised release profile for `x86_64-unknown-linux-musl`. It rejects
 binaries that need a dynamic loader or shared libraries, and runs the HTTP suite
-with the exact Linux release binary outside the source tree. Musl static linking
+with the exact Linux release binary outside the source tree. CI also installs the
+packaged systemd service on its Ubuntu runner, checks HTTP port 80 and verifies
+that a saved collection survives a service restart. Musl static linking
 avoids a dependency on the build runner's glibc version.
 
 After merging the workflow, make the package version in `Cargo.toml` and
 `Cargo.lock` match the intended release, commit, then push a matching version tag:
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
 The workflow creates a draft, uploads all assets, then publishes it. Prerelease
