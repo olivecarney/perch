@@ -1,6 +1,7 @@
 """Shell transaction tests; no Proxmox host or systemd daemon is contacted."""
 import hashlib
 import io
+import shlex
 from pathlib import Path
 import subprocess
 import tarfile
@@ -68,6 +69,160 @@ class Deployment(unittest.TestCase):
         self.assertEqual(service['CapabilityBoundingSet'], 'CAP_NET_BIND_SERVICE')
         self.assertEqual(service['AmbientCapabilities'], 'CAP_NET_BIND_SERVICE')
         self.assertEqual(service['NoNewPrivileges'], 'true')
+
+    def test_default_mode_uses_safe_perch_resources(self):
+        result = self.shell('scripts/proxmox/install.sh', '''
+            roots=$'local-lvm\\nfast'
+            templates=local
+            pvesh() { printf 123; }
+            nproc() { printf 8; }
+            perch_bridges() { printf 'vmbr0\\n'; }
+            perch_set_defaults
+            printf '%s\\n' "$CTID|$MEMORY|$SWAP|$CORES|$DISK|$PORT|$IP|$IPV6|$ONBOOT|$PROTECTION|$STORAGE"
+        ''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), '123|512|256|1|2|80|dhcp|manual|1|0|local-lvm')
+
+    def test_advanced_back_navigation_preserves_wizard(self):
+        result = self.shell('scripts/proxmox/install.sh', '''
+            IP=dhcp IPV6=manual backed=0
+            perch_ask_field() {
+                printf '%s\\n' "$1" >> "$PWD/steps"
+                if [[ $1 == CORES && $backed == 0 ]]; then backed=1; return 1; fi
+            }
+            perch_review() { return 0; }
+            perch_advanced
+        ''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        steps = (self.path / 'steps').read_text().splitlines()
+        index = steps.index('CORES')
+        self.assertEqual(steps[index + 1], 'TEMPLATE_STORAGE')
+        self.assertNotIn('GATEWAY', steps)
+        self.assertNotIn('GATEWAY6', steps)
+
+    def test_network_options_reach_pct_without_shell_interpolation(self):
+        result = self.shell('scripts/proxmox/install.sh', '''
+            CTID=123 HOSTNAME=perch CORES=1 MEMORY=512 SWAP=256 DISK=2 STORAGE=local-lvm
+            BRIDGE=vmbr0 IP=192.168.10.5/24 GATEWAY=192.168.10.1 IPV6=auto GATEWAY6=''
+            VLAN=10 MTU=1500 MAC=02:00:00:00:00:01 FIREWALL=1 DNS=1.1.1.1 SEARCHDOMAIN=lan
+            TAGS='perch;dashboard' ONBOOT=1 PROTECTION=1 TIMEZONE=host SSH_KEYS=none
+            perch_create_ct() { printf '%s\\n' "$@" > "$PWD/options"; }
+            perch_provision local:vztmpl/debian.tar.zst
+        ''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = (self.path / 'options').read_text().splitlines()
+        net = args[args.index('--net0') + 1]
+        for part in ['ip=192.168.10.5/24', 'gw=192.168.10.1', 'ip6=auto', 'tag=10',
+                     'mtu=1500', 'hwaddr=02:00:00:00:00:01', 'firewall=1']:
+            self.assertIn(part, net.split(','))
+        self.assertEqual(args[args.index('--tags') + 1], 'perch;dashboard')
+        self.assertEqual(args[args.index('--protection') + 1], '1')
+
+    def test_template_extraction_uses_safe_umask_without_changing_caller(self):
+        result = self.shell('scripts/proxmox/install.sh', '''
+            umask 077
+            pvesh() { :; }
+            pct() { umask > "$PWD/template-umask"; }
+            perch_create_ct 123 local:vztmpl/debian.tar.zst
+            umask
+        ''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.path / 'template-umask').read_text().strip(), '0022')
+        self.assertEqual(result.stdout.strip(), '0077')
+
+    def test_saved_defaults_are_data_and_never_executed(self):
+        (self.path / 'defaults').write_text('HOSTNAME=$(touch pwned)\nROOT_PASSWORD=secret\n')
+        result = self.shell('scripts/proxmox/install.sh', '''
+            ROOT_PASSWORD=''
+            perch_load_defaults "$PWD/defaults"
+        ''')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.path / 'pwned').exists())
+
+    def test_failed_defaults_write_keeps_previous_file(self):
+        (self.path / 'defaults').write_text('HOSTNAME=previous\n')
+        result = self.shell('scripts/proxmox/install.sh', '''
+            PERCH_SAVED_FIELDS=(HOSTNAME)
+            HOSTNAME=next
+            printf() { builtin printf 'HOSTNAME=truncated\\n'; return 1; }
+            if perch_save_defaults "$PWD/defaults"; then exit 0; else exit 1; fi
+        ''')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.path / 'defaults').read_text(), 'HOSTNAME=previous\n')
+
+    def test_disabled_ssh_stops_and_masks_both_activation_paths(self):
+        result = self.shell('scripts/proxmox/install.sh', '''
+            CTID=123 SSH_KEYS=none
+            systemctl() { printf '%s\\n' "$*" >> "$PWD/ssh-commands"; }
+            export -f systemctl
+            pct() { shift 3; "$@"; }
+            perch_configure_ssh
+        ''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        commands = (self.path / 'ssh-commands').read_text()
+        self.assertIn('stop ssh.service ssh.socket', commands)
+        self.assertIn('mask ssh.service ssh.socket', commands)
+
+    def test_url_formats_ipv6_and_omits_default_http_port(self):
+        for address, port, expected in [('192.168.1.5', '80', 'http://192.168.1.5'),
+                                        ('2001:db8::1', '80', 'http://[2001:db8::1]'),
+                                        ('2001:db8::1', '3000', 'http://[2001:db8::1]:3000')]:
+            result = self.shell('scripts/proxmox/install.sh', f'perch_url "{address}" "{port}"')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, expected)
+
+    def test_advanced_settings_validation(self):
+        valid = [('HOSTNAME', 'perch.home.arpa'), ('IPV6', '2001:db8::2/64'),
+                 ('IPV6', 'auto'), ('GATEWAY', '192.168.1.1'),
+                 ('DNS', '1.1.1.1 2606:4700:4700::1111'), ('MAC', '02:00:00:00:00:01'),
+                 ('SEARCHDOMAIN', 'none.example'), ('TAGS', 'perch;dashboard'),
+                 ('TIMEZONE', 'host'), ('VLAN', '4094'), ('SWAP', '0')]
+        invalid = [('HOSTNAME', 'bad..name'), ('IPV6', '2001:::2/64'),
+                   ('IPV6', '2001:db8::2/129'), ('GATEWAY', '10.0.0.1'),
+                   ('DNS', '1.1.1.1,tag=2'), ('MAC', '01:00:00:00:00:01'),
+                   ('TAGS', 'perch;$(id)'), ('TIMEZONE', '../../etc/passwd'),
+                   ('VLAN', '4095'), ('MTU', '1500,tag=2'), ('MEMORY', '128')]
+        for expected, cases in [(0, valid), (1, invalid)]:
+            for field, value in cases:
+                result = self.shell('scripts/proxmox/install.sh',
+                    'IP=192.168.1.5/24; IPV6=auto; perch_validate_field '
+                    + shlex.quote(field) + ' ' + shlex.quote(value))
+                self.assertEqual(result.returncode == 0, expected == 0, (field, value, result.stderr))
+
+    def test_plain_default_and_cancel_modes(self):
+        for answers, expected in [('1\ny\n', 'confirmed'), ('0\n', 'cancelled')]:
+            (self.path / 'answers').write_text(answers)
+            result = self.shell('scripts/proxmox/install.sh', '''
+                pvesh() { printf 123; }
+            nproc() { printf 8; }
+                perch_bridges() { printf 'vmbr0\\n'; }
+                roots=local-lvm templates=local PERCH_UI=plain DEFAULTS_FILE="$PWD/no-defaults"
+                exec 3< "$PWD/answers"
+                perch_set_defaults
+                if perch_choose_settings; then printf confirmed; else printf cancelled; fi
+            ''')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, expected)
+
+    def test_saved_defaults_round_trip_excludes_password_and_id(self):
+        result = self.shell('scripts/proxmox/install.sh', '''
+            pvesh() { printf 123; }
+            nproc() { printf 8; }
+            perch_bridges() { printf 'vmbr0\\n'; }
+            roots=local-lvm templates=local
+            perch_set_defaults
+            ROOT_PASSWORD='a-test-secret' HOSTNAME=custom
+            perch_save_defaults "$PWD/saved/defaults"
+            perch_set_defaults
+            perch_load_defaults "$PWD/saved/defaults"
+            printf '%s\\n' "$HOSTNAME|$CTID|$ROOT_PASSWORD"
+        ''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'custom|123|')
+        file = self.path / 'saved/defaults'
+        self.assertNotIn('ROOT_PASSWORD', file.read_text())
+        self.assertNotIn('CTID=', file.read_text())
+        self.assertEqual(file.stat().st_mode & 0o777, 0o600)
 
     def archive(self, bad_member=None, version='v0.1.0', symlink=False):
         archive = self.path / 'release.tar.gz'

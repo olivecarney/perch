@@ -30,7 +30,7 @@ jobs:
           rustup toolchain install "$version" --profile minimal --component rustfmt,clippy --target "$TARGET"
           rustup override set "$version"
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends musl-tools shellcheck
+          sudo apt-get install -y --no-install-recommends musl-tools shellcheck whiptail
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -43,6 +43,7 @@ jobs:
           bash -n scripts/proxmox/install.sh scripts/install-native.sh scripts/perch-update scripts/release-common.sh
           shellcheck -x scripts/proxmox/install.sh scripts/install-native.sh scripts/perch-update scripts/release-common.sh
           python3 tests/test_deployment.py
+          python3 tests/test_installer_tui.py
       - name: Build and verify static Linux binary
         env:
           RUSTFLAGS: -C target-feature=+crt-static
@@ -99,6 +100,11 @@ jobs:
             sleep 1
           done
           python3 -c 'import json; assert json.load(open("/tmp/perch-native-data.json"))[0]["name"] == "CI persistence check"'
+          # Exercise the host's IPv6 configuration helper against this disposable VM.
+          source scripts/proxmox/install.sh
+          pct() { shift 3; sudo "$@"; }
+          CTID=123 IPV6=auto PORT=80
+          perch_configure_bind
       - uses: actions/upload-artifact@v4
         with:
           name: perch-x86_64-unknown-linux-musl

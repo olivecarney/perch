@@ -93,10 +93,8 @@ The container runs as UID/GID `10001:10001` and stores its collection at `/data/
 
 ## Proxmox VE LXC
 
-**Release prerequisite:** at the time this installer was added, this repository had
-no published releases. The command below becomes usable after these files reach
-`main` and the first version tag finishes the **Check and release** workflow.
-Until then, it exits before creating a container. See [Releases](https://github.com/olivecarney/perch/releases).
+Precompiled Linux releases are available from [Releases](https://github.com/olivecarney/perch/releases).
+The installer verifies the selected release before creating a container.
 
 Run this one command in an interactive **Proxmox host shell as root**:
 
@@ -127,23 +125,72 @@ catalogue if it is not already present on the chosen template storage.
 | Hostname / bridge | `perch` / `vmbr0` |
 | IPv4 / DNS | DHCP / inherit host DNS |
 | CPU | 1 core |
-| RAM / swap | 256 MiB / 256 MiB |
+| RAM / swap | 512 MiB / 256 MiB (256 MiB RAM available in Advanced) |
 | Root disk | 2 GiB |
 | Port | `80` (standard HTTP; no port suffix needed) |
 | Container | Unprivileged; starts at host boot |
 
-Every setting above is prompted, including storage, release version and a static
-IPv4 address/prefix, gateway and space-separated IPv4 DNS servers. IPv6 provisioning
-is not currently supported. Ports must be 1–65535. Port 80 requires release
-`v0.1.2` or newer; older releases can still use a port such as 3000. Existing CT and VM IDs are
-always refused; the installer never deletes containers. You confirm the settings
-before creation. A failed installation retains any newly created CT for diagnosis.
+### Default and Advanced setup
 
-These are conservative starting defaults, **not measured Proxmox minimums**. The
-single-thread Rust service has no server-side image processing, but Debian, APT,
-logs and app data also need resources. Maximum supported inline logos can consume
-about 12 MB of JSON before in-memory overhead. Increase RAM/disk for your workload;
-the default footprint and installation peak memory still need real-host validation.
+On a normal Proxmox terminal the installer uses `whiptail` dialogs with arrow-key
+navigation. A small terminal or host without `whiptail` gets a plain-text fallback;
+no UI packages or external installer framework are downloaded onto the host.
+
+- **Default Install** uses the table above, selects an unused cluster-wide ID and
+  prefers `vmbr0`. If multiple eligible storage pools exist, you select the disk
+  and template storage. A summary requires confirmation before creation.
+- **Advanced Install** walks through every supported setting, validates each
+  answer and lets you go Back without losing earlier answers. Back from the first
+  step returns to the mode menu. Cancel/Exit there creates nothing. In the text
+  fallback, use `:back` and `:cancel` in input prompts.
+- **Use saved Perch defaults** appears after you save a configuration. Advanced
+  setup offers to save its non-secret settings in `/etc/perch-lxc/defaults`.
+  The file is root-only, parsed as data rather than executed, and never stores a
+  root password or CT ID. Each installation still gets a new ID and confirmation.
+
+Advanced settings include:
+
+| Area | Controls |
+| --- | --- |
+| Identity and storage | CT ID, hostname/FQDN, disk storage, template storage |
+| Resources | CPU, RAM, swap, root disk size |
+| Networking | Bridge/active SDN VNet, IPv4 DHCP/static, gateway, IPv6 none/SLAAC/DHCP/static |
+| Network details | IPv4/IPv6 DNS, search domain, VLAN, MTU, MAC, interface firewall |
+| Container settings | Tags, timezone, start at boot, deletion protection |
+| Access | Optional root console password and public-key-only root SSH |
+| Application | HTTP port and release version |
+
+SSH is disabled and masked by default, including socket activation. If you select
+a public-key file on the host, the installer supplies it to Proxmox, installs
+OpenSSH in the CT and enables key-only root access. A console password does not
+enable password SSH. The UI never displays or saves that password.
+
+IPv6 defaults to no address assignment (`manual` in PVE). When enabled, the
+installer sets `HOST=::` and verifies both IPv6 and IPv4 HTTP access; this requires
+Linux dual-stack sockets (`net.ipv6.bindv6only=0`). The normal IPv4-only default
+continues to use `HOST=0.0.0.0`. VLANs, MTUs and static routes must also be supported
+by your physical network.
+
+Ports must be 1–65535. Port 80 requires release `v0.1.2` or newer; older releases
+can use a port such as 3000. Existing CT/VM IDs are always refused. Failed installs
+retain the new CT and print inspection commands; no CT is automatically deleted.
+
+This captures the useful Community Scripts setup pattern without claiming full
+framework parity or upstream affiliation. Perch always uses an unprivileged
+Debian 13 CT with nesting enabled for systemd isolation. It does not expose
+privileged containers, disabling that required feature, GPU/TUN/FUSE passthrough,
+APT/HTTP proxy management, IP-range scanning or arbitrary post-install hooks.
+Those add complexity or access that this dashboard does not need. See the
+[comparison and design notes](docs/proxmox-setup.md).
+
+The 512 MiB RAM default gives Debian and APT more headroom during installation;
+Advanced can select 256 MiB. These remain **starting defaults, not measured
+Proxmox minimums**. The comparable Community Scripts Glance installer also uses
+512 MiB for Debian. Perch's single-thread service has no server-side image
+processing, but Debian, APT, logs and app data also need resources. Maximum
+supported inline logos can consume about 12 MB of JSON before in-memory overhead.
+Increase resources for your workload; footprint and peak installation memory
+still need real-host measurement.
 
 After installation, use `pct exec 123 -- hostname -I` to find the address, then open
 `http://<container-ip>/` (replace `123` throughout with your CT ID).
@@ -210,7 +257,7 @@ pct exec 123 -- perch-update
 Or run `perch-update` as root inside the CT. To choose a published version:
 
 ```bash
-pct exec 123 -- perch-update v0.1.2
+pct exec 123 -- perch-update v0.1.3
 ```
 
 The updater resolves the latest stable GitHub release once, downloads its x86_64
@@ -265,10 +312,11 @@ changes. It may be partially configured. Choose a new ID for another attempt, or
 explicitly remove the failed CT after checking it contains no needed data.
 
 To remove **the entire container and all its data**, first copy your backup off
-it, verify the CT ID, and then explicitly run:
+it, verify the CT ID, and then explicitly run (clear protection if you enabled it):
 
 ```bash
 pct stop 123
+pct set 123 --protection 0
 pct destroy 123 --purge
 ```
 
@@ -299,8 +347,8 @@ After merging the workflow, make the package version in `Cargo.toml` and
 `Cargo.lock` match the intended release, commit, then push a matching version tag:
 
 ```bash
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.1.3
+git push origin v0.1.3
 ```
 
 The workflow creates a draft, uploads all assets, then publishes it. Prerelease
@@ -335,11 +383,13 @@ cargo build --release --locked
 PERCH_BINARY=target/release/perch python3 tests/test_http.py
 node --test tests/logos.test.mjs
 python3 tests/test_deployment.py
+python3 tests/test_installer_tui.py
 bash -n scripts/proxmox/install.sh scripts/install-native.sh scripts/perch-update scripts/release-common.sh
 shellcheck -x scripts/proxmox/install.sh scripts/install-native.sh scripts/perch-update scripts/release-common.sh
 actionlint
 ```
 
+The terminal-dialog tests additionally use `whiptail` (installed in Linux CI).
 Python 3 is needed for HTTP integration tests, and Node.js 18+ for the logo tests. Neither is needed to run Perch. HTTP tests use disposable server processes and temporary collections, leaving your apps untouched.
 
 ## License and attribution
