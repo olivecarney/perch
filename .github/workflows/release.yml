@@ -36,6 +36,7 @@ jobs:
           node-version: '22'
       - name: Check and test
         run: |
+          python3 tests/test_installer_tui.py
           cargo fmt --check
           cargo test --locked
           cargo clippy --locked --all-targets -- -D warnings
@@ -43,7 +44,6 @@ jobs:
           bash -n scripts/proxmox/install.sh scripts/install-native.sh scripts/perch-update scripts/release-common.sh
           shellcheck -x scripts/proxmox/install.sh scripts/install-native.sh scripts/perch-update scripts/release-common.sh
           python3 tests/test_deployment.py
-          python3 tests/test_installer_tui.py
       - name: Build and verify static Linux binary
         env:
           RUSTFLAGS: -C target-feature=+crt-static

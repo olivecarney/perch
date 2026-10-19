@@ -203,7 +203,7 @@ perch_validate_field() {
 
 perch_notice() {
     if [[ ${PERCH_UI:-plain} == dialog ]]; then
-        whiptail --title Perch --msgbox "$1" 12 76 <&3
+        whiptail --title Perch --msgbox "$1" 12 76 <&3 >&2
     else
         printf '\n%s\n' "$1" >&2
     fi
@@ -212,7 +212,7 @@ perch_notice() {
 perch_yes() {
     local yes_label=${2:-Confirm} no_label=${3:-Back}
     if [[ ${PERCH_UI:-plain} == dialog ]]; then
-        whiptail --title Perch --defaultno --yes-button "$yes_label" --no-button "$no_label" --yesno "$1" 20 78 <&3
+        whiptail --title Perch --defaultno --yes-button "$yes_label" --no-button "$no_label" --yesno "$1" 20 78 <&3 >&2
     else
         local response
         printf '\n%s\n%s? [y/N]: ' "$1" "$yes_label" >&2
@@ -222,12 +222,13 @@ perch_yes() {
 }
 
 perch_menu() {
+    # FD 3 is the terminal input; FD 4 captures only the dialog answer.
     local variable=$1 title=$2 current=$3 selection cancel_label=Back
     shift 3
     [[ $title != 'Choose an installation mode' ]] || cancel_label=Exit
     if [[ ${PERCH_UI:-plain} == dialog ]]; then
-        selection=$(whiptail --output-fd 1 --title Perch --backtitle "${PERCH_PROGRESS:-Perch · Proxmox VE installer}" \
-            --ok-button Select --cancel-button "$cancel_label" --default-item "$current" --menu "$title" 20 78 10 "$@" <&3) || return 1
+        selection=$(whiptail --title Perch --backtitle "${PERCH_PROGRESS:-Perch · Proxmox VE installer}" \
+            --ok-button Select --cancel-button "$cancel_label" --default-item "$current" --menu "$title" 20 78 10 "$@" 4>&1 1>&2 2>&4 <&3) || return 1
     else
         printf '\n%s\n' "$title" >&2
         while (($#)); do printf '  %s  %s\n' "$1" "$2" >&2; shift 2; done
@@ -243,9 +244,9 @@ perch_input() {
     local variable=$1 label=$2 current=$3 secret=${4:-no} response
     if [[ ${PERCH_UI:-plain} == dialog ]]; then
         if [[ $secret == yes ]]; then
-            response=$(whiptail --output-fd 1 --title Perch --backtitle "${PERCH_PROGRESS:-Advanced setup}" --ok-button Next --cancel-button Back --passwordbox "$label" 12 78 <&3) || return 1
+            response=$(whiptail --title Perch --backtitle "${PERCH_PROGRESS:-Advanced setup}" --ok-button Next --cancel-button Back --passwordbox "$label" 12 78 4>&1 1>&2 2>&4 <&3) || return 1
         else
-            response=$(whiptail --output-fd 1 --title Perch --backtitle "${PERCH_PROGRESS:-Advanced setup}" --ok-button Next --cancel-button Back --inputbox "$label" 12 78 "$current" <&3) || return 1
+            response=$(whiptail --title Perch --backtitle "${PERCH_PROGRESS:-Advanced setup}" --ok-button Next --cancel-button Back --inputbox "$label" 12 78 "$current" 4>&1 1>&2 2>&4 <&3) || return 1
         fi
     else
         printf '\n%s [%s] (:back / :cancel): ' "$label" "${current:-empty}" >&2
