@@ -18,7 +18,7 @@ Run against a disposable collection so development does not change your normal d
 PERCH_DATA=data/dev-apps.json cargo run
 ```
 
-Open `http://127.0.0.1:3000`. There is no frontend package installation or bundler. Changes to `public/` require recompilation because assets are embedded.
+Open `http://127.0.0.1:3000` for local development. Installed Proxmox/systemd deployments use port 80 and are reached at `http://<server-ip>/` without a port suffix. There is no frontend package installation or bundler. Changes to `public/` require recompilation because assets are embedded.
 
 ## Find the right code
 

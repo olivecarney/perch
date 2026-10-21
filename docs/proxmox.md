@@ -147,8 +147,9 @@ systemctl restart perch
 ```
 
 Then open `http://<container-ip>/`. This does not touch your collection. Ensure
-port 80 is available and permitted by your firewall. Native builds launched by
-hand and Docker retain their existing port 3000 default.
+port 80 is available and permitted by your firewall. Manually launched builds retain their port 3000 default. Docker listens on
+port 3000 inside the container; the [documented Docker command](installation.md#docker)
+publishes it on host port 80.
 
 ### Updates and backups
 

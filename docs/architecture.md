@@ -36,7 +36,7 @@ Array order is display order. Reordering requires an exact permutation of curren
 
 ## Deployment
 
-Native builds default to loopback port 3000. Docker runs as UID/GID `10001:10001` with `/data/apps.json`. Packaged systemd installations run as `perch`, normally on port 80 with `/var/lib/perch/apps.json`.
+Native builds default to loopback port 3000. Docker runs as UID/GID `10001:10001` on internal port 3000 with `/data/apps.json`; the documented `80:3000` mapping exposes host port 80. Packaged systemd installations run as `perch`, normally on port 80 with `/var/lib/perch/apps.json`.
 
 The native updater verifies release checksums before stopping the service, replaces the executable atomically and attempts rollback if startup or the HTTP health check fails. It preserves the collection, environment file and service unit. See [Proxmox operations](proxmox.md) for details and limitations.
 

@@ -11,7 +11,11 @@ A minimal homelab dashboard built with Rust and [Topcoat](https://github.com/tok
 - **Automatic logos.** Resolve favicons directly from your services, or choose a bundled icon, image URL or uploaded image.
 - **A single data file.** Your links and their order live in a local JSON file.
 
-## Quick start
+## Install on Proxmox VE
+
+Follow the [Proxmox VE installation guide](docs/proxmox.md) to create a managed container. The installed dashboard uses **HTTP port 80**: open **`http://<container-ip>/`**, with no port number needed in the address.
+
+## Run locally from source
 
 Build with **Rust 1.98 or newer**:
 
@@ -22,9 +26,9 @@ cargo build --release --locked
 ./target/release/perch
 ```
 
-Open **http://127.0.0.1:3000** and select **Add app**. The built binary runs without the source tree or `public/` directory; build for your server's OS and CPU architecture.
+For this manually launched build, open **http://127.0.0.1:3000** and select **Add app**. Local builds use port 3000; the packaged Proxmox service uses port 80. The built binary runs without the source tree or `public/` directory; build for your server's OS and CPU architecture.
 
-For access from other devices on your trusted LAN:
+To expose this manually launched build to other devices on your trusted LAN at `http://<server-ip>:3000/`:
 
 ```sh
 HOST=0.0.0.0 PORT=3000 PERCH_DATA=/path/to/perch/apps.json ./target/release/perch

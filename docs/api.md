@@ -2,14 +2,14 @@
 
 [Documentation](README.md) · [Architecture](architecture.md)
 
-The dashboard and API share the same origin. Examples use the native default `http://127.0.0.1:3000`; adjust the host and port for your deployment.
+The dashboard and API share the same origin. Examples run on the installed Proxmox/systemd server, which uses HTTP port 80 (`http://127.0.0.1`, with no port suffix). From another machine, replace `127.0.0.1` with the dashboard's IP or hostname. For a local development build, use `http://127.0.0.1:3000` instead.
 
 There is no authentication. Anyone who can reach the server can read and change the collection. Browser cross-origin writes are rejected, but that is not access control for scripts or other clients.
 
 ## Read the collection
 
 ```sh
-curl --fail http://127.0.0.1:3000/api/apps
+curl --fail http://127.0.0.1/api/apps
 ```
 
 `GET /api/apps` returns a JSON array in display order, or `[]` for an empty collection. An entry looks like:
@@ -29,7 +29,7 @@ curl --fail http://127.0.0.1:3000/api/apps
 ## Create an app
 
 ```sh
-curl --fail-with-body http://127.0.0.1:3000/api/apps \
+curl --fail-with-body http://127.0.0.1/api/apps \
   -H 'Content-Type: application/json' \
   --data '{"action":"save","app":{"id":0,"name":"NAS","address":"nas.local","logo":"auto"}}'
 ```

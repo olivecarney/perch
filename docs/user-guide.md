@@ -4,6 +4,10 @@
 
 Perch is a grid of shortcuts to your homelab services. It does not monitor service availability. JavaScript must be enabled in your browser.
 
+## Open your dashboard
+
+For the Proxmox installation, open `http://<container-ip>/`. The service uses HTTP port 80, so no port number is needed. The documented Docker setup also exposes port 80 at `http://<docker-host>/`. Manually launched development builds use `http://127.0.0.1:3000/`.
+
 ## Add an app
 
 1. Select **Add app**.
