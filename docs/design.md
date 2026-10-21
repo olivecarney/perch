@@ -1,9 +1,0 @@
-# Perch
-
-A private, ultra lightweight Rust + Topcoat app launcher. Updated to the user's minimalist direction: no sidebar, hero text, sections, favorites, categories, descriptions, search, view switching, export UI, or demo mode. The entire main screen is a small brand/header and a grid of app logos and names. Use an industrial greyscale palette, locally embedded JetBrains Mono (Ghostty’s bundled typeface), square edges, and fine alignment/corner marks. Preserve the Perch bird shape. CSS greyscale applies to all service logos, including uploaded and resolved images.
-
-Add/edit forms expose name and URL, with optional logo overrides in a collapsed details element. Default logos resolve directly in the browser from bounded favicon candidates on the app's own origin, including port and subpath. No extra Rust dependencies or server fetch/proxy are introduced. Resolution is lazy, cached per page, limited to 2.2 seconds per candidate, and falls back to a bundled or generic logo. HTML metadata-only icons and browser authentication/certificate/mixed-content restrictions require a manual logo override.
-
-Editing mode exposes pointer drag handles and accessible earlier/later buttons. Preserve order in the existing JSON array with a validated exact permutation, writing atomically before committing memory. Canceling drag restores the stored order. Existing legacy category/favorite/description values remain compatible and hidden. New minimal app payloads default these fields.
-
-Verification: Rust validation/order/persistence tests, actual HTTP reorder/restart and stale-list rejection tests, dependency-free Node favicon candidate tests, and browser QA of creation, editing, favicon fallback/override, drag/button reordering, reload, and mobile. User data is never replaced with test apps; visual QA uses a separate temporary collection.

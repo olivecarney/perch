@@ -13,3 +13,5 @@ __pycache__
 *.pem
 *.key
 .DS_Store
+
+.local
